@@ -1,6 +1,7 @@
 // TestDB
 // W.J. Riley, K2HRT
 // 03/24/17
+// Last Revised 07/14/17
 // Program to test a simple interface between
 // the TAPR TICC and a PostgreSQL database
 // to store 1 pps clock measurements
@@ -42,6 +43,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
+#include <time.h>
 
 // File and port header files
 #include <sys/fcntl.h> // For open(), etc.
@@ -76,9 +79,10 @@
 #define TAU 1
 #define AF 1
 
-// Control macro
+// Control macros
 #define VERBOSE 1
 #define READINI 1
+#define USEDB 1
 
 // Function prototypes
 PGconn *ConnectToDB(char *database, char *user, char *host,	char *password);
@@ -181,32 +185,34 @@ int main(void)
 		file_open=1;
 	}
 	
-	// Connect to database
-	conn=ConnectToDB(DATABASE, USER, HOST, PASSWORD);
-	
-	// Was a database connection made?
-	if(conn)
+	if(USEDB)
 	{
-		// Set database connected flag
-		db_connected=1;
+		// Connect to database
+		conn=ConnectToDB(DATABASE, USER, HOST, PASSWORD);
+	
+		// Was a database connection made?
+		if(conn)
+		{
+			// Set database connected flag
+			db_connected=1;
+		}
+		
+		// Get next meas_id
+		meas_id=GetNextMeasID(conn);
+		
+		#if(1) // For testing
+		printf("meas_id=%d\n", meas_id);
+		#endif
+		
+		// Enter measurement run into database
+		EnterMeas(conn, meas_id, sn, sig_id, ref_id, frequency, description, mjd, tau*af);
 	}
-	
-	// Get next meas_id
-	meas_id=GetNextMeasID(conn);
-	
-	#if(1) // For testing
-	printf("meas_id=%d\n", meas_id);
-	#endif
-	
-	#if(1)
-	// Enter measurement run into database
-	EnterMeas(conn, meas_id, sn, sig_id, ref_id, frequency, description, mjd, tau*af);
-	#endif
-	
+
 	// Open COMport
 	fd=OpenPort();
 	
-	#if(1) // For testing
+	#if(0) // For testing
+	// This message could be retained
 	printf("File descriptor=%d\n", fd);
 	#endif
 	
@@ -216,7 +222,7 @@ int main(void)
 	
 	#if(1) // Main loop
 	// Read and store timetagged TICC phase measurements
-	// Loop forever
+	// Loop forever until q command received
 	while(1)
 	{
 		// Get phase reading from TICC
@@ -224,19 +230,19 @@ int main(void)
 		
 		// Check for bad reading
 		// Value must be between +/- 1.0 and not zero
-		if((phase!=0.0)&&(phase>-1.0)&&(phase<1.0))
+		if((phase!=0.0)&&(phase>=-1.0)&&(phase<=1.0))
 		{
 			// Get current MJD from system
 			mjd=GetMJD();
 			
 			#if(1) // For testing
+			// This message can be retained
 			// Meas count is <1 while points being skipped
 			// MJD is displayed as 12345.123456
 			// Phase data is of form -0.123456789012
 			printf("#=%d, MJD=%12.6f, Phase=%15.12f\n", nmeas, mjd, phase);
 			#endif
 			
-			#if(1) // For testing
 			if(db_connected)
 			{
 				// Skip 1st few points
@@ -249,12 +255,12 @@ int main(void)
 						StoreMeasurement(conn, sn, mjd, phase);
 					
 						#if(1) // For testing
+						// This message should be retained
 						printf("Meas stored in database: Pt #=%d\n", nmeas/af);
 						#endif
 					}
 				}
 			}
-			#endif
 			
 			if((nmeas>0))
 			{
@@ -265,6 +271,7 @@ int main(void)
 					fprintf(fptr, "%12.6f %15.12f\n", mjd, phase);
 						
 					#if(1) // For testing
+					// This message should be retained
 					printf("Meas stored in file: Pt #=%d\n", nmeas/af);
 					#endif
 				}
@@ -272,14 +279,6 @@ int main(void)
 			
 			// Increment mesurement count
 			nmeas++;
-			
-			#if(0)
-			// Check for quit command
-			if(((c=getchar())=='q'))
-			{
-				break;
-			}
-			#endif
 		}
 		
 		// Check for quit command
@@ -369,6 +368,7 @@ PGconn *ConnectToDB(char *database, char *user, char *host,
 	}
 
 	#if(1) // For testing
+	// This message should be retained
 	printf("Connected to database\n");
 	#endif
 
@@ -503,98 +503,17 @@ int OpenPort(void)
 }
 #endif
 
-#if(0) // Original
-// Read COM Port
-// Get one TICC phase measurement
-double ReadCOM(int fd)
-{
-	// Local variables
-	char input[2]; // Read buffer
-	char value[128]; // Value buffer
-	int i=0; // Index
-
-	int n=0; // # chars read
-	double phase=0.0; // Phase value
-	
-	// Initialize the value string
-	strcpy(value, "");
-	
-	// Avoid compiler warning
-	n=n;
-
-	// Read TICC data stream 1 character at a time
-	// into input buffer buffer
-	// and concatenate those characters into value buffer
-	// Look for space character after numeric value
-	// and print value (will eventually process it)
-	// Look for ')' character at end of TICC line
-	// and clear value buffer for next linePGresult *DoSQL(PGconn *conn, char *cmd)
-	
-	
-	// Loop through 15 character phase data stream
-	// of form: -0.123456789012
-	for(i=0; i<15; i++)
-	{
-		// Read incoming character
-		n=read(fd, input, 1);
-		
-		// Add character to value buffer
-		strcat(value, input);
-		
-		#if(0) // Display the character
-		printf("%i, %s\n", i, input);
-		#endif
-		
-		// Clear the input buffer
-		strcpy(input, "");
-	}
-	
-	// Swallow the rest of the characters on the line
-	// up to the final newline
-	while(input[0]!='\n')
-	{
-		read(fd, input, 1);
-	}
-	
-	// Ignore the newline too
-	read(fd, input, 1);
-	
-	input[15]='\0';
-		
-	#if(1) // For testing
-	printf("#=%d, ", n);
-	#endif
-
-
-	#if(1) // For testing
-	printf("Value=%s, ", value);
-	#endif
-	
-	// Get phase value
-	phase=atof(value);
-	
-	#if(1) // For testing
-	printf("Phase=%15.12f\n", phase);
-	#endif
-	
-	return phase;
-}
-#endif
-
 #if(1) // New
 // Read COM Port
 // Get one TICC phase measurement
+// Revised 07/13/17 to handle negative phase values
 double ReadCOM(int fd)
 {
 	// Local variables
 	char input[BUFFER_SIZE]; // Read buffer
 	char value[BUFFER_SIZE+1]; // Value buffer
-	int i=0; // Index
-	int n=0; // # chars read
+	int n=0; // # chars read - used only for testing
 	double phase=0.0; // Phase value
-	
-	// To avoid compiler warning
-	i=i;
 	
 	// Initialize the input buffer
 	strcpy(input, "");
@@ -605,14 +524,6 @@ double ReadCOM(int fd)
 	// Read TICC data stream 1 character at a time
 	// into input buffer buffer
 	// and concatenate those characters into value buffer
-	// Look for space character after numeric value
-	// and print value (will eventually process it)
-
-	// Look for ')' character at end of TICC line
-	// and clear value buffer for next linePGresult *DoSQL(PGconn *conn, char *cmd)
-	
-	// Clear the character count
-	n=0;
 	
 	// Read 1 line of input from TICC
 	while(input[0]!='\n')
@@ -620,34 +531,36 @@ double ReadCOM(int fd)
 		// Read incoming character
 		read(fd, input, 1);
 		
-		// Add character to value buffer
-		strcat(value, input);
+		// Truncate the input buffer
+		input[1]='\0';
 		
-		// Increment the chracter count
-		n++;
-		
-		#if(0) // Display the character
-		printf("%i, %s\n", i, input);
-		#endif
+		// Is character numeric?
+		if((isdigit(input[0])) || (input[0]=='-') || (input[0]=='.'))
+		{
+			// Add character to value buffer
+			strcat(value, input);
+			
+			// Increment the character count
+			n++;
+			
+			#if(0) // For testing
+			// Display the character and value string
+			// The value string grows to something like:
+			// -0.123456789012-
+			printf("%i, %c, %s\n", n, input[0], value);
+			#endif
+		}
 	}
 	
-	// Ignore everything else
-	read(fd, input, BUFFER_SIZE);
-	
-	#if(0) // For testing
-	printf("Length=%d\n", strlen(input));
-	#endif
-	
-	// Discard the non-numeric characters
-	// A positive phase reading w/o - has space at end
-	// A negative phase reading with - doesn't
+	// Add EOS after phase value
+	// Discard the trailing - at the end from the TI A->B
 	value[15]='\0';
 		
 	// Get phase value
 	phase=atof(value);
 	
 	#if(0) // For testing
-	printf("#=%d, ", n);
+	// Show the phase string and value
 	printf("Value=%s, ", value);
 	printf("Phase=%15.12f\n", phase);
 	#endif
@@ -659,17 +572,53 @@ double ReadCOM(int fd)
 #if(1)
 // Function to get current MJD
 // System should use NTP to set its clock
+// Use this version which has high resolution (1ms)
 double GetMJD(void)
 {
 	// Local variables
 	double mjd; // MJD
 	double sec; // UNIX seconds
+	double millisec; // UNIX milliseconds
 	struct timeb tb; // UNIX time strut
 	
 	// Get MJD from system clock
 	ftime(&tb);
-	sec=tb.time+tb.millitm/1000.;
-	mjd=40587.+sec/86400.;
+	sec=(double)(tb.time);
+	millisec=(double)(tb.millitm);
+	mjd=40587.0+(sec/86400.0)+(millisec/(86400.0*1000.0));
+	
+	#if(0) // for testing
+	printf("sec=%f\n", sec);
+	printf("millisec=%f\n", millisec);
+	printf("mjd=%f\n", mjd);
+	#endif
+	
+	return mjd;
+}
+#endif
+
+#if(0)
+// Function to get current MJD
+// System should use NTP to set its clock
+// This version has low resolution (1s)
+// Use version above with higher resolution
+double GetMJD(void)
+{
+	// Local variables
+	double mjd; // MJD
+	double sec; // UNIX seconds
+	
+	// Get MJD from system clock
+	sec=(double)(time(NULL));
+	mjd=40587.0+(sec/86400.0);
+	
+	#if(1) // For testing
+	printf("time=%lu\n", time(NULL));
+	printf("sec=%f\n", sec);
+	printf("days=%f\n", sec/86400.0);
+	printf("mjd=%f\n", mjd);
+	#endif
+	
 	return mjd;
 }
 #endif
